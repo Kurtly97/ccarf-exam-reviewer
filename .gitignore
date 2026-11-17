@@ -1,0 +1,6 @@
+node_modules/
+*.log
+.DS_Store
+
+# Source PDFs kept locally for reference only — not redistributed publicly
+*.pdf
