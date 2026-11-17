@@ -800,8 +800,10 @@ function Quiz({ session, onFinish, onExit }) {
               const ans = (answers[qq.id] || []).length > 0;
               const isCur = i === index;
               const isFlag = flagged.has(qq.id);
+              const isGraded = mode === "practice" && checked.has(qq.id);
               let cls = "bg-slate-100 text-slate-600";
               if (ans) cls = "bg-teal-100 text-teal-800";
+              if (isGraded) cls = isCorrect(qq, answers[qq.id]) ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800";
               if (isFlag) cls = "bg-amber-100 text-amber-800 ring-1 ring-amber-400";
               if (isCur) cls += " ring-2 ring-teal-600";
               return (
