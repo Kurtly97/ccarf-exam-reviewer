@@ -35,8 +35,8 @@ const SCENARIOS = [
     description: "Supplemental practice questions sourced from the community exam-question bank (ExamTopics-style), covering multi-agent research pipelines, customer-support escalation, and MCP tool design. Not grouped into one production scenario — each question stands alone." },
   { id: 8, title: "CCAF Prep Course (Eric Spencer)", range: "ES1–ES19",
     description: "Supplemental practice questions from Eric Spencer's CCAF Prep Course, deduplicated against the rest of the bank — covering tool normalization, context-budget limits, batch-API cadence, and crash recovery. Not grouped into one production scenario — each question stands alone." },
-  { id: 9, title: "Supplemental Practice Set 2", range: "SP1–SP8",
-    description: "A small set of additional practice questions, checked for accuracy and deduplicated against the rest of the bank — covering prompt scope narrowing, example diversity for generalization, escalation when written policy is silent, test-driven iterative refinement with Claude Code, disambiguating identical customer matches, skill auto-invocation control, batching interacting code edits, and extensible enum design. Not grouped into one production scenario — each question stands alone." },
+  { id: 9, title: "Supplemental Practice Set 2", range: "SP1–SP12",
+    description: "A small set of additional practice questions, checked for accuracy and deduplicated against the rest of the bank — covering prompt scope narrowing, example diversity for generalization, escalation when written policy is silent, test-driven iterative refinement with Claude Code, disambiguating identical customer matches, skill auto-invocation control, batching interacting code edits, extensible enum design, host-enforced tool-call limits, dependency-aware task decomposition, partial-staleness session resumption, and Edit disambiguation via added context. Not grouped into one production scenario — each question stands alone." },
 ];
 
 const DOMAINS = [
@@ -1597,6 +1597,58 @@ const QUESTIONS = [
     correctAnswers: ["A"],
     rationale: "Designing enums for extensibility with an \"other\" (or \"unclear\") escape value plus a free-text detail field surfaces unanticipated categories instead of silently forcing them into a wrong bucket, keeping the controlled vocabulary intact while capturing novel cases for review. Why not the others: dropping the enum (B) sacrifices the validation and normalization that make the field useful downstream; a fine-tuned classifier (C) is heavy over-engineering when a schema change solves the problem; enumerating every possible type (D) is impossible to complete and still breaks on the next truly novel document.",
     topicTag: "Extensible Enum Design",
+  },
+  {
+    id: "SP9", scenarioId: 9, domainId: 1, type: "single", requiredSelections: 1,
+    prompt: "A research agent can search regulatory filings, query market data, and retrieve internal reports. The correct next source depends on evidence returned by the previous tool, but production policy requires a maximum of eight tool calls. Which orchestration approach is MOST appropriate?",
+    options: [
+      { key: "A", text: "Always call the three tools in a fixed order and stop after one pass." },
+      { key: "B", text: "Let Claude invoke tools without retaining results or enforcing a call limit." },
+      { key: "C", text: "Let Claude select each next tool while the host preserves results and enforces the limit." },
+      { key: "D", text: "Ask Claude to list every tool it might need before the host executes any." },
+    ],
+    correctAnswers: ["C"],
+    rationale: "Model-driven tool selection is appropriate because each observation can change the next research action. The host should retain every tool request and result, continue according to stop_reason, and enforce the deterministic eight-call limit as a safety ceiling layered on top of — not a replacement for — stop_reason-driven control. Why not the others: a fixed sequence (A) can suit stable workflows but cannot adapt when returned evidence indicates a different source or follow-up; discarding results with no enforced limit (B) breaks continuity and violates the stated production policy; up-front full planning (D) can be useful, but the complete tool sequence cannot be known reliably before the agent observes intermediate evidence.",
+    topicTag: "Host-Enforced Call Limit with Adaptive Selection",
+  },
+  {
+    id: "SP10", scenarioId: 9, domainId: 1, type: "single", requiredSelections: 1,
+    prompt: "A repository-wide authentication change affects an API handler, a shared token library, integration tests, and deployment documentation. The handler depends on the revised library interface, while the documentation and initial test analysis can proceed independently. Which decomposition strategy is BEST?",
+    options: [
+      { key: "A", text: "Give each subagent several isolated code lines, then merge all edits by timestamp." },
+      { key: "B", text: "Let all subagents modify every affected file concurrently and resolve conflicts automatically." },
+      { key: "C", text: "Complete all code, tests, and documentation serially with one general-purpose subagent." },
+      { key: "D", text: "Assign coherent concerns, sequence interface-dependent work, parallelize independent work, then run integration review." },
+    ],
+    correctAnswers: ["D"],
+    rationale: "The coordinator should divide work into coherent concerns, provide the necessary interface context, sequence the handler work after the shared-library contract is known, and parallelize genuinely independent analysis; a final integration review then catches cross-artifact inconsistencies. Why not the others: arbitrary line-level fragments (A) deprive agents of coherent context and make integration unreliable; overlapping concurrent edits (B) create avoidable conflicts and ignore the stated interface dependency; fully serial execution (C) avoids merge conflicts but sacrifices useful parallelism and specialist boundaries.",
+    topicTag: "Dependency-Aware Task Decomposition",
+  },
+  {
+    id: "SP11", scenarioId: 9, domainId: 1, type: "single", requiredSelections: 1,
+    prompt: "A named Claude Code session was interrupted after analyzing six files for a checkout refactor. Overnight, another developer substantially changed two of the analyzed files, while the other four remained unchanged. The team wants to preserve useful context without treating stale file observations as current. What should the architect do FIRST?",
+    options: [
+      { key: "A", text: "Resume the named session and re-analyze the two changed files before continuing." },
+      { key: "B", text: "Resume unchanged and instruct Claude to trust every result already in the session." },
+      { key: "C", text: "Fork the session solely to make all earlier tool results current automatically." },
+      { key: "D", text: "Delete all session state and restart without any summary of the prior investigation." },
+    ],
+    correctAnswers: ["A"],
+    rationale: "The named session retains useful context, but observations for the two externally modified files are stale. Resuming and performing targeted re-analysis refreshes just the affected facts before further decisions — when only a minority of the prior work has gone stale, resuming and informing the session which files changed is more efficient than discarding everything. Why not the others: trusting stale results for modified files (B) can produce incorrect conclusions or edits; forking (C) preserves the original line of work but does not refresh stale repository observations; discarding all context (D) is unnecessary when only two known files require refresh.",
+    topicTag: "Partial-Staleness Session Resumption",
+  },
+  {
+    id: "SP12", scenarioId: 9, domainId: 2, type: "single", requiredSelections: 1,
+    prompt: "Claude Code attempts to change \"timeout: 30\" in services.yaml, but Edit reports that the target text occurs six times. Only the billing-worker setting should change, and unrelated content must remain intact. What should Claude do FIRST?",
+    options: [
+      { key: "A", text: "Read the relevant section, identify unique surrounding billing-worker context, and retry Edit with a specific anchor." },
+      { key: "B", text: "Repeat the identical Edit call until the tool chooses one of the six matching locations." },
+      { key: "C", text: "Use Write immediately to replace the entire file with a newly generated version containing the change." },
+      { key: "D", text: "Use Grep to replace every occurrence of timeout: 30 and then inspect the resulting file." },
+    ],
+    correctAnswers: ["A"],
+    rationale: "Edit needs enough unique surrounding context to identify the intended location. Reading the relevant section first lets Claude construct a precise anchor and preserve unrelated content — the right move when only one of several identical occurrences should change (a full Read-then-Write rewrite is the correct fallback instead when every occurrence legitimately needs the same edit, not when a single occurrence must be selectively targeted). Why not the others: repeating the same ambiguous request (B) adds no distinguishing context and cannot reliably select the intended occurrence; an immediate full-file Write (C) is unnecessarily risky when a targeted edit can likely be disambiguated; Grep-based global replacement (D) would change all six occurrences, violating the requirement to modify only the billing-worker setting.",
+    topicTag: "Edit Disambiguation via Added Context",
   },
 ];
 
