@@ -35,8 +35,8 @@ const SCENARIOS = [
     description: "Supplemental practice questions sourced from the community exam-question bank (ExamTopics-style), covering multi-agent research pipelines, customer-support escalation, and MCP tool design. Not grouped into one production scenario — each question stands alone." },
   { id: 8, title: "CCAF Prep Course (Eric Spencer)", range: "ES1–ES19",
     description: "Supplemental practice questions from Eric Spencer's CCAF Prep Course, deduplicated against the rest of the bank — covering tool normalization, context-budget limits, batch-API cadence, and crash recovery. Not grouped into one production scenario — each question stands alone." },
-  { id: 9, title: "Supplemental Practice Set 2", range: "SP1–SP3",
-    description: "A small set of additional practice questions, checked for accuracy and deduplicated against the rest of the bank — covering prompt scope narrowing, example diversity for generalization, and escalation when written policy is silent. Not grouped into one production scenario — each question stands alone." },
+  { id: 9, title: "Supplemental Practice Set 2", range: "SP1–SP4",
+    description: "A small set of additional practice questions, checked for accuracy and deduplicated against the rest of the bank — covering prompt scope narrowing, example diversity for generalization, escalation when written policy is silent, and test-driven iterative refinement with Claude Code. Not grouped into one production scenario — each question stands alone." },
 ];
 
 const DOMAINS = [
@@ -1532,6 +1532,19 @@ const QUESTIONS = [
     correctAnswers: ["B"],
     rationale: "A gap in policy is itself a reason to escalate: a staff member can decide the case, and the assistant avoids inventing a rule. Why not the others: A applies the grooming rule by analogy, which is the invented policy the assistant must avoid; C picks a refund amount the assistant has no authority or written basis to choose; D treats silence as a negative rule, which is itself an unwritten decision — the policy is silent, not a denial.",
     topicTag: "Escalation on Policy Silence",
+  },
+  {
+    id: "SP4", scenarioId: 9, domainId: 3, type: "single", requiredSelections: 1,
+    prompt: "You're implementing a complex graph traversal algorithm with specific performance requirements and edge cases to handle (disconnected nodes, cycles, weighted edges) using Claude Code. You want to structure your workflow for efficient iterative refinement with Claude. What approach will most effectively enable progressive improvement across multiple iterations?",
+    options: [
+      { key: "A", text: "Have Claude extensively research the algorithm and create a detailed implementation plan using extended thinking, then implement the complete solution based on that plan." },
+      { key: "B", text: "Provide Claude with a reference implementation from documentation, then ask it to rewrite the code to match your codebase style and add the required edge case handling, comparing outputs against the reference." },
+      { key: "C", text: "Write a test suite covering expected behavior, edge cases, and performance requirements before implementation. Ask Claude to write code that passes the tests, then iterate by sharing test failures with each refinement request." },
+      { key: "D", text: "Provide Claude with a detailed natural language specification of the algorithm, including all requirements and edge cases. Review each output manually and provide descriptive feedback on what behavior needs to change." },
+    ],
+    correctAnswers: ["C"],
+    rationale: "A test suite is an objective verification loop: it encodes expected traversal behavior for disconnected graphs, cycles, weighted edges, invalid inputs, and performance constraints, so Claude can implement, run the suite, inspect concrete failures, and refine using evidence rather than subjective judgment. Why not the others: A produces a thoughtful plan but gives no mechanism to verify or drive improvement once implementation starts; B risks inheriting assumptions or gaps from a reference that may not fit this codebase's constraints; D makes the developer the verification system, which doesn't scale across iterations the way an executable pass/fail check does.",
+    topicTag: "Test-Driven Iterative Refinement",
   },
 ];
 
