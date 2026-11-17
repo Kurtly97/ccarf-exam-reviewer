@@ -35,6 +35,8 @@ const SCENARIOS = [
     description: "Supplemental practice questions sourced from the community exam-question bank (ExamTopics-style), covering multi-agent research pipelines, customer-support escalation, and MCP tool design. Not grouped into one production scenario — each question stands alone." },
   { id: 8, title: "CCAF Prep Course (Eric Spencer)", range: "ES1–ES19",
     description: "Supplemental practice questions from Eric Spencer's CCAF Prep Course, deduplicated against the rest of the bank — covering tool normalization, context-budget limits, batch-API cadence, and crash recovery. Not grouped into one production scenario — each question stands alone." },
+  { id: 9, title: "Supplemental Practice Set 2", range: "SP1–SP3",
+    description: "A small set of additional practice questions, checked for accuracy and deduplicated against the rest of the bank — covering prompt scope narrowing, example diversity for generalization, and escalation when written policy is silent. Not grouped into one production scenario — each question stands alone." },
 ];
 
 const DOMAINS = [
@@ -1489,6 +1491,47 @@ const QUESTIONS = [
     correctAnswers: ["C"],
     rationale: "Prose summaries collapse free-flowing text and lose exactly the kind of metadata (URLs, page numbers, dates) that citations need; tagging claims with a citation_id at the point of discovery, then carrying an inline marker through the narrative alongside a separate structured index, keeps content and attribution linked without forcing the narrative itself to carry the metadata's weight. Why not the others: A re-inflates the context window with everything summarization was meant to compress, risking the same \"lost in the middle\" problems it was solving; B asks the report agent to guess at sources it was never actually given, which produces plausible-looking but fabricated citations; D is a prompt instruction with a non-zero failure rate for exactly the information-preservation problem a structural fix should solve instead.",
     topicTag: "Inline Citation Tagging with Structured Index",
+  },
+
+  // ───────────────────────────── Scenario 9 ─────────────────────────────
+  {
+    id: "SP1", scenarioId: 9, domainId: 4, type: "single", requiredSelections: 1,
+    prompt: "Rivermark Council uses Claude to review building-permit applications and flag clauses that create legal or safety risk. The prompt says 'flag anything risky', and staff now spend most of their time dismissing flags on standard boilerplate, such as the council's own indemnity wording. The council has a list of risk categories it cares about and a list of routine clauses that never need review. How should the team change the prompt?",
+    options: [
+      { key: "A", text: "List the risk categories to report and the routine clauses to skip, with an example of each." },
+      { key: "B", text: "Tell Claude to flag a clause only when it is highly confident that the clause is risky." },
+      { key: "C", text: "Explain how the council's permit process works and who reads the flags, and keep the instruction." },
+      { key: "D", text: "Ask Claude to score each clause's risk from 1 to 10 and report only scores of 7 or higher." },
+    ],
+    correctAnswers: ["A"],
+    rationale: "The council already knows what to report and what to skip. Writing those lists into the prompt gives Claude a clear boundary, so standard boilerplate stops being flagged. Why not the others: B lets Claude be highly confident that boilerplate looks risky, so a confidence bar alone doesn't say which clauses belong in or out; C adds useful background but leaves 'anything risky' undefined; D only moves the threshold — without the categories, Claude still has no basis for scoring boilerplate low.",
+    topicTag: "Narrowing Prompt Scope with Explicit Categories",
+  },
+  {
+    id: "SP2", scenarioId: 9, domainId: 4, type: "single", requiredSelections: 1,
+    prompt: "Northbridge Admissions uses Claude to extract applicant details from school transcripts. The prompt has two examples, both from the two most common transcript layouts, and extraction on those layouts is accurate. On a third layout, which puts grades in a side table, Claude misses fields. The team wants Claude to handle layouts it has not seen yet, not only this third one. Which change to the examples is best?",
+    options: [
+      { key: "A", text: "Swap in examples that cover clearly different layouts, including the one with a side table." },
+      { key: "B", text: "Add a prompt rule for the side-table layout, and add another rule for each new layout found." },
+      { key: "C", text: "Add more examples of the most common layout so that Claude learns each field more thoroughly." },
+      { key: "D", text: "Remove the examples and describe each field's meaning in more detail in the output schema." },
+    ],
+    correctAnswers: ["A"],
+    rationale: "Examples that vary in structure teach Claude the judgement behind the extraction, so it can apply it to layouts it has not seen. Why not the others: B fixes only the layouts already found and does nothing for the next unfamiliar one; C narrows what Claude has seen, the opposite of what generalization needs; D describes what to extract but not how to find fields in unfamiliar layouts.",
+    topicTag: "Example Diversity for Generalization",
+  },
+  {
+    id: "SP3", scenarioId: 9, domainId: 5, type: "single", requiredSelections: 1,
+    prompt: "A Pawswell Veterinary customer asks for a refund after cancelling a pet's boarding stay two days before it began. The assistant's policy documents cover refunds for grooming and vet visits but say nothing about boarding. The assistant must not make up policy. What should it do?",
+    options: [
+      { key: "A", text: "Apply the grooming cancellation rule, since it is the closest written policy to boarding." },
+      { key: "B", text: "Pass the request to a staff member and explain that no written policy covers boarding refunds." },
+      { key: "C", text: "Offer a partial refund as a goodwill gesture, since the customer cancelled with some notice." },
+      { key: "D", text: "Tell the customer that no refund is available, because no written policy allows one for boarding." },
+    ],
+    correctAnswers: ["B"],
+    rationale: "A gap in policy is itself a reason to escalate: a staff member can decide the case, and the assistant avoids inventing a rule. Why not the others: A applies the grooming rule by analogy, which is the invented policy the assistant must avoid; C picks a refund amount the assistant has no authority or written basis to choose; D treats silence as a negative rule, which is itself an unwritten decision — the policy is silent, not a denial.",
+    topicTag: "Escalation on Policy Silence",
   },
 ];
 
