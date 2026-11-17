@@ -217,6 +217,14 @@ function barColor(pct) {
   return "bg-rose-500";
 }
 
+const SCALED_SCORE_MIN = 100;
+const SCALED_SCORE_MAX = 1000;
+const SCALED_SCORE_PASS = 700;
+
+function scaledScore(pct) {
+  return Math.round(SCALED_SCORE_MIN + (pct / 100) * (SCALED_SCORE_MAX - SCALED_SCORE_MIN));
+}
+
 function Pill({ children, className }) {
   return (
     <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${className}`}>
@@ -270,6 +278,11 @@ function Home({ history, onStart, onClearHistory }) {
   const [domainPick, setDomainPick] = useState(() => new Set());
   const [quickCount, setQuickCount] = useState(15);
 
+  const officialQuestionCount = useMemo(
+    () => QUESTIONS.filter((q) => OFFICIAL_SCENARIO_IDS.includes(q.scenarioId)).length,
+    []
+  );
+
   function toggleSet(setFn, current, id) {
     const next = new Set(current);
     if (next.has(id)) next.delete(id);
@@ -292,7 +305,8 @@ function Home({ history, onStart, onClearHistory }) {
         </div>
         <h1 className="text-3xl font-bold text-slate-900">CCAR-F Exam Reviewer</h1>
         <p className="text-slate-600 max-w-2xl">
-          60 practice questions across 6 scenarios, tagged by the 5 official blueprint domains. Recommended target:
+          {QUESTIONS.length} practice questions across {SCENARIOS.length} scenarios, tagged by the {DOMAINS.length} official
+          blueprint domains. Recommended target:
           <span className="font-semibold text-slate-800"> 75% or better in every domain.</span>
         </p>
         <p className="text-xs text-slate-400">
@@ -375,14 +389,14 @@ function Home({ history, onStart, onClearHistory }) {
         <ModeCard
           title="Exam Simulation"
           badge="Timed · 120 min"
-          description="Mirrors the live exam: 4 scenarios drawn at random from the 6, ~40 questions, one attempt at pace."
+          description={`Mirrors the live exam: 4 scenarios drawn at random from the ${OFFICIAL_SCENARIO_IDS.length}, ~40 questions, one attempt at pace.`}
           action="Start simulation"
           onClick={() => onStart(buildExamSimulationSession())}
         />
         <ModeCard
           title="Full Practice Set"
           badge="Timed · 120 min"
-          description="All 60 questions across all 6 scenarios, shuffled, matching the live exam's 120-minute limit."
+          description={`All ${officialQuestionCount} questions across all ${OFFICIAL_SCENARIO_IDS.length} scenarios, shuffled, matching the live exam's 120-minute limit.`}
           action="Start full set"
           onClick={() => onStart(buildFullSetSession())}
         />
@@ -846,6 +860,9 @@ function Results({ result, onRetakeMissed, onHome }) {
     ? questions.filter((q) => score.wrongIds.includes(q.id))
     : questions;
 
+  const scaled = scaledScore(score.scorePct);
+  const scaledPass = scaled >= SCALED_SCORE_PASS;
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 text-center">
@@ -855,6 +872,21 @@ function Results({ result, onRetakeMissed, onHome }) {
           {score.correctCount} of {score.total} correct
           {score.scorePct >= 75 ? " · 🎉 Meets the 75% target" : " · Below the 75% target"}
         </p>
+
+        <div className="inline-flex items-center gap-2 mt-4 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
+          <span className="text-sm text-slate-600">Scaled score:</span>
+          <span className="text-sm font-bold text-slate-800">
+            {scaled} / {SCALED_SCORE_MAX}
+          </span>
+          <Pill className={scaledPass ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}>
+            {scaledPass ? "Pass" : `Below ${SCALED_SCORE_PASS}`}
+          </Pill>
+        </div>
+        <p className="text-xs text-slate-400 mt-1.5 max-w-md mx-auto">
+          Illustrative scaled score ({SCALED_SCORE_MIN}–{SCALED_SCORE_MAX} scale, informal {SCALED_SCORE_PASS} pass line) —
+          not the official Anthropic scoring formula.
+        </p>
+
         <div className="flex justify-center gap-3 mt-5 flex-wrap">
           <button onClick={onHome} className="px-4 py-2 rounded-lg border border-slate-300 text-sm">
             ← Back to home
