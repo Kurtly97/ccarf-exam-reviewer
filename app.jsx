@@ -674,6 +674,12 @@ function Quiz({ session, onFinish, onExit }) {
     onFinish({ session, answers });
   }
 
+  function confirmFinish() {
+    if (window.confirm("Finish and score this session now? You won't be able to change any answers afterward.")) {
+      finish();
+    }
+  }
+
   const answeredCount = Object.keys(answers).filter((id) => (answers[id] || []).length > 0).length;
   const unansweredRemaining = questions.length - answeredCount;
 
@@ -692,6 +698,12 @@ function Quiz({ session, onFinish, onExit }) {
               ⏱ {formatTime(timeLeft)}
             </Pill>
           )}
+          <button
+            onClick={confirmFinish}
+            className="lg:hidden px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700"
+          >
+            Finish & Score
+          </button>
           <button onClick={onExit} className="text-xs text-slate-400 hover:text-rose-500 underline">
             Exit
           </button>
@@ -794,7 +806,7 @@ function Quiz({ session, onFinish, onExit }) {
                 </button>
               ) : (
                 <button
-                  onClick={finish}
+                  onClick={confirmFinish}
                   className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm hover:bg-emerald-700"
                 >
                   Finish & Score
@@ -828,7 +840,7 @@ function Quiz({ session, onFinish, onExit }) {
             })}
           </div>
           <button
-            onClick={finish}
+            onClick={confirmFinish}
             className="w-full px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700"
           >
             Finish & Score
