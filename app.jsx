@@ -28,6 +28,64 @@ function isCorrect(question, selected) {
   return arraysEqualAsSets(question.correctAnswers, selected || []);
 }
 
+const WHY_NOT_MARKER = "Why not the others:";
+const LEADING_LETTERS_RE = /^([A-E](?:\s*,\s*[A-E])*(?:\s*,?\s*and\s*[A-E])?)\b[,:]?\s*/i;
+const PAREN_LETTERS_RE = /\(\s*([A-E](?:\s*,\s*[A-E])*(?:\s*,?\s*and\s*[A-E])?)\s*\)/i;
+
+function extractLetters(str) {
+  return str
+    .split(/,|and/i)
+    .map((s) => s.trim())
+    .filter((s) => /^[A-E]$/i.test(s))
+    .map((s) => s.toUpperCase());
+}
+
+function capitalizeFirst(str) {
+  if (!str) return str;
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function parseRationale(rationaleText) {
+  const markerIdx = rationaleText.indexOf(WHY_NOT_MARKER);
+  if (markerIdx === -1) {
+    return { explanation: rationaleText.trim(), bullets: [] };
+  }
+
+  const explanation = rationaleText.slice(0, markerIdx).trim();
+  const tail = rationaleText.slice(markerIdx + WHY_NOT_MARKER.length).trim();
+  const rawClauses = tail
+    .split(";")
+    .map((c) => c.trim())
+    .filter(Boolean);
+
+  const bullets = [];
+  for (const clause of rawClauses) {
+    const leadingMatch = clause.match(LEADING_LETTERS_RE);
+    if (leadingMatch) {
+      const letters = extractLetters(leadingMatch[1]);
+      const text = capitalizeFirst(clause.slice(leadingMatch[0].length).trim());
+      bullets.push({ letters, text });
+      continue;
+    }
+
+    const parenMatch = clause.match(PAREN_LETTERS_RE);
+    if (parenMatch) {
+      const letters = extractLetters(parenMatch[1]);
+      const text = capitalizeFirst(clause.replace(PAREN_LETTERS_RE, "").replace(/\s{2,}/g, " ").trim());
+      bullets.push({ letters, text });
+      continue;
+    }
+
+    if (bullets.length > 0) {
+      bullets[bullets.length - 1].text = `${bullets[bullets.length - 1].text}; ${clause}`;
+    } else {
+      bullets.push({ letters: [], text: capitalizeFirst(clause) });
+    }
+  }
+
+  return { explanation, bullets };
+}
+
 function formatTime(totalSeconds) {
   const s = Math.max(0, Math.floor(totalSeconds));
   const m = Math.floor(s / 60);
@@ -164,6 +222,39 @@ function Pill({ children, className }) {
     <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${className}`}>
       {children}
     </span>
+  );
+}
+
+function RationaleBlock({ rationale, isCorrect, meta }) {
+  const { explanation, bullets } = useMemo(() => parseRationale(rationale), [rationale]);
+  const boxCls = isCorrect ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200";
+  const badgeCls = isCorrect ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700";
+
+  return (
+    <div className={`border rounded-lg p-4 text-sm text-slate-700 ${boxCls}`}>
+      <div className="flex items-center justify-between mb-2">
+        <p className="font-semibold text-slate-800">Rationale</p>
+        <Pill className={badgeCls}>{isCorrect ? "✓ Correct" : "✗ Incorrect"}</Pill>
+      </div>
+
+      <p className="whitespace-pre-wrap leading-relaxed">{explanation}</p>
+
+      {bullets.length > 0 && (
+        <div className="mt-3">
+          <p className="font-medium text-slate-700 mb-1">Why other options are incorrect:</p>
+          <ul className="space-y-1 list-disc pl-5">
+            {bullets.map((b, i) => (
+              <li key={i}>
+                {b.letters.length > 0 && <span className="font-semibold mr-1">{b.letters.join(", ")} —</span>}
+                {b.text}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {meta}
+    </div>
   );
 }
 
@@ -653,10 +744,12 @@ function Quiz({ session, onFinish, onExit }) {
           </div>
 
           {mode === "practice" && hasCheckedCurrent && (
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4 text-sm text-slate-700">
-              <p className="font-semibold mb-1 text-slate-800">Rationale</p>
-              <p className="whitespace-pre-wrap leading-relaxed">{q.rationale}</p>
-              <p className="mt-2 text-xs text-slate-500">Topic: {q.topicTag}</p>
+            <div className="mb-4">
+              <RationaleBlock
+                rationale={q.rationale}
+                isCorrect={isCorrect(q, selected)}
+                meta={<p className="mt-2 text-xs text-slate-500">Topic: {q.topicTag}</p>}
+              />
             </div>
           )}
 
@@ -861,13 +954,15 @@ function Results({ result, onRetakeMissed, onHome }) {
                         );
                       })}
                     </div>
-                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                      <p className="font-semibold text-slate-800 mb-1">Rationale</p>
-                      <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">{q.rationale}</p>
-                      <p className="mt-2 text-xs text-slate-500">
-                        Domain: {domainName(q.domainId)} · Topic: {q.topicTag}
-                      </p>
-                    </div>
+                    <RationaleBlock
+                      rationale={q.rationale}
+                      isCorrect={ok}
+                      meta={
+                        <p className="mt-2 text-xs text-slate-500">
+                          Domain: {domainName(q.domainId)} · Topic: {q.topicTag}
+                        </p>
+                      }
+                    />
                   </div>
                 )}
               </div>
