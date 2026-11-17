@@ -189,11 +189,23 @@ function Home({ history, onStart, onClearHistory }) {
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
       <header className="space-y-2">
-        <p className="text-teal-700 font-semibold tracking-wide text-sm uppercase">Claude Certified Architect — Foundations</p>
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-teal-700 font-semibold tracking-wide text-sm uppercase">Claude Certified Architect — Foundations</p>
+          <button
+            onClick={onClearHistory}
+            className="text-xs text-slate-400 hover:text-rose-500 underline shrink-0 mt-0.5"
+            title="Permanently deletes all locally saved attempt history and progress stats from this browser."
+          >
+            Clear my data
+          </button>
+        </div>
         <h1 className="text-3xl font-bold text-slate-900">CCAR-F Exam Reviewer</h1>
         <p className="text-slate-600 max-w-2xl">
           60 practice questions across 6 scenarios, tagged by the 5 official blueprint domains. Recommended target:
           <span className="font-semibold text-slate-800"> 75% or better in every domain.</span>
+        </p>
+        <p className="text-xs text-slate-400">
+          All progress is stored only in this browser (localStorage) — nothing is sent to a server.
         </p>
       </header>
 
@@ -201,12 +213,6 @@ function Home({ history, onStart, onClearHistory }) {
         <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
             <h2 className="text-lg font-semibold text-slate-800">Your Progress</h2>
-            <button
-              onClick={onClearHistory}
-              className="text-xs text-slate-400 hover:text-rose-500 underline"
-            >
-              Clear history
-            </button>
           </div>
           <div className="grid sm:grid-cols-3 gap-4 mb-5">
             <div className="bg-slate-50 rounded-lg p-4">
