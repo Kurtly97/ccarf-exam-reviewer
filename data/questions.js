@@ -35,8 +35,8 @@ const SCENARIOS = [
     description: "Supplemental practice questions sourced from the community exam-question bank (ExamTopics-style), covering multi-agent research pipelines, customer-support escalation, and MCP tool design. Not grouped into one production scenario — each question stands alone." },
   { id: 8, title: "CCAF Prep Course (Eric Spencer)", range: "ES1–ES19",
     description: "Supplemental practice questions from Eric Spencer's CCAF Prep Course, deduplicated against the rest of the bank — covering tool normalization, context-budget limits, batch-API cadence, and crash recovery. Not grouped into one production scenario — each question stands alone." },
-  { id: 9, title: "Supplemental Practice Set 2", range: "SP1–SP4",
-    description: "A small set of additional practice questions, checked for accuracy and deduplicated against the rest of the bank — covering prompt scope narrowing, example diversity for generalization, escalation when written policy is silent, and test-driven iterative refinement with Claude Code. Not grouped into one production scenario — each question stands alone." },
+  { id: 9, title: "Supplemental Practice Set 2", range: "SP1–SP8",
+    description: "A small set of additional practice questions, checked for accuracy and deduplicated against the rest of the bank — covering prompt scope narrowing, example diversity for generalization, escalation when written policy is silent, test-driven iterative refinement with Claude Code, disambiguating identical customer matches, skill auto-invocation control, batching interacting code edits, and extensible enum design. Not grouped into one production scenario — each question stands alone." },
 ];
 
 const DOMAINS = [
@@ -1545,6 +1545,58 @@ const QUESTIONS = [
     correctAnswers: ["C"],
     rationale: "A test suite is an objective verification loop: it encodes expected traversal behavior for disconnected graphs, cycles, weighted edges, invalid inputs, and performance constraints, so Claude can implement, run the suite, inspect concrete failures, and refine using evidence rather than subjective judgment. Why not the others: A produces a thoughtful plan but gives no mechanism to verify or drive improvement once implementation starts; B risks inheriting assumptions or gaps from a reference that may not fit this codebase's constraints; D makes the developer the verification system, which doesn't scale across iterations the way an executable pass/fail check does.",
     topicTag: "Test-Driven Iterative Refinement",
+  },
+  {
+    id: "SP5", scenarioId: 9, domainId: 1, type: "single", requiredSelections: 1,
+    prompt: "A customer gives only the name \"Maria Garcia.\" get_customer returns three distinct matching accounts. Logs show the agent proceeds with the most recently active match, and in several cases it has processed refunds against the wrong customer's order. What is the correct behavior?",
+    options: [
+      { key: "A", text: "Continue with the most recently active of the three accounts, since it is the most likely current customer." },
+      { key: "B", text: "Pick the match with the highest fuzzy name-similarity score and proceed." },
+      { key: "C", text: "Escalate every multiple-match case straight to a human agent." },
+      { key: "D", text: "Ask the customer for an additional identifier (order number, email, or ZIP) to disambiguate before taking any account action." },
+    ],
+    correctAnswers: ["D"],
+    rationale: "When multiple customer records match, the agent must not guess; requesting an additional identifier resolves the ambiguity and prevents acting on the wrong account. Why not the others: A guesses on recency, which is exactly the behavior producing misdirected refunds; B guesses on name similarity, which cannot distinguish two people with the same name; C needlessly hands off a case the agent can resolve itself with one clarifying question, undermining first-contact resolution when disambiguation is straightforward.",
+    topicTag: "Disambiguating Identical Matches",
+  },
+  {
+    id: "SP6", scenarioId: 9, domainId: 3, type: "single", requiredSelections: 1,
+    prompt: "A team's `.claude/skills/dep-audit/` skill is meant to be run manually before releases, but Claude keeps auto-invoking it mid-session whenever dependency files come up, dumping roughly 4,000 lines of resolution output into unrelated refactoring sessions. The team still wants engineers to be able to run `/dep-audit` explicitly. What is the most effective fix?",
+    options: [
+      { key: "A", text: "Call `/compact` automatically at the end of the skill so the audit output is condensed before work continues." },
+      { key: "B", text: "Set `disable-model-invocation: true` in the skill's SKILL.md frontmatter so the skill runs only when a user explicitly invokes `/dep-audit`." },
+      { key: "C", text: "Delete the skill's `description` frontmatter so Claude can no longer match it to conversation topics." },
+      { key: "D", text: "Move the audit instructions into CLAUDE.md so they load once at startup instead of triggering mid-session." },
+    ],
+    correctAnswers: ["B"],
+    rationale: "`disable-model-invocation: true` is the frontmatter switch built for exactly this: it removes the skill from Claude's automatic invocation while keeping explicit `/dep-audit` slash invocation available. Why not the others: `/compact` (A) reacts only after the 4,000 lines have already polluted and degraded the session; deleting the description (C) also strips the human- and tooling-facing documentation and isn't the supported suppression mechanism; moving the instructions into CLAUDE.md (D) makes the verbose audit part of every session's baseline context, worsening rather than fixing the problem.",
+    topicTag: "disable-model-invocation Frontmatter",
+  },
+  {
+    id: "SP7", scenarioId: 9, domainId: 3, type: "single", requiredSelections: 1,
+    prompt: "A developer needs three changes that all touch the shared `PaymentStatus` enum and the several functions that switch on it. They sent each change as a separate sequential message; after the third message the project no longer compiles because the earlier edits did not anticipate the later ones. What is the best way to structure the request?",
+    options: [
+      { key: "A", text: "Run each of the three changes in its own fresh session so they stay cleanly isolated." },
+      { key: "B", text: "Enable plan mode and approve the three changes one at a time in sequence." },
+      { key: "C", text: "Keep them sequential but ask Claude to re-read the enum before each message." },
+      { key: "D", text: "Batch the three interacting changes into a single message so Claude edits the enum and all dependent switch sites together with full mutual context." },
+    ],
+    correctAnswers: ["D"],
+    rationale: "Fixes that interact — here all three touch one enum and its dependent switches — should be batched into a single message so the model reasons about them jointly and keeps the code internally consistent; only independent changes benefit from being sequenced separately. Why not the others: separate fresh sessions (A) make the interaction worse by discarding shared context each time; plan-mode approvals (B) still process the edits one at a time, reproducing the same ordering problem; re-reading the enum each message (C) treats a coordination problem as a memory problem, when the real fix is letting the model see all three interacting edits at once.",
+    topicTag: "Batching Interacting Edits",
+  },
+  {
+    id: "SP8", scenarioId: 9, domainId: 4, type: "single", requiredSelections: 1,
+    prompt: "The extraction schema uses an enum with six known values for document_type. A new vendor begins sending \"credit memo\" documents, which are not in the enum, and the model force-fits them to \"invoice\", corrupting downstream routing. What is the best design change?",
+    options: [
+      { key: "A", text: "Add an \"other\" value to the enum plus an optional document_type_detail string so novel types are captured verbatim instead of misclassified." },
+      { key: "B", text: "Remove the enum constraint entirely and let the model emit any free-text string for document_type." },
+      { key: "C", text: "Fine-tune a dedicated document-type classifier and run it before extraction to assign the type." },
+      { key: "D", text: "Brainstorm and add every conceivable document type to the enum so no future document falls outside it." },
+    ],
+    correctAnswers: ["A"],
+    rationale: "Designing enums for extensibility with an \"other\" (or \"unclear\") escape value plus a free-text detail field surfaces unanticipated categories instead of silently forcing them into a wrong bucket, keeping the controlled vocabulary intact while capturing novel cases for review. Why not the others: dropping the enum (B) sacrifices the validation and normalization that make the field useful downstream; a fine-tuned classifier (C) is heavy over-engineering when a schema change solves the problem; enumerating every possible type (D) is impossible to complete and still breaks on the next truly novel document.",
+    topicTag: "Extensible Enum Design",
   },
 ];
 
