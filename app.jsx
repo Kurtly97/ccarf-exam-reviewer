@@ -991,11 +991,14 @@ function Results({ result, onRetakeMissed, onHome }) {
                         if (isRight) cls = "border-emerald-400 bg-emerald-50";
                         else if (wasSel) cls = "border-rose-400 bg-rose-50";
                         return (
-                          <div key={opt.key} className={`p-2 rounded border text-xs ${cls}`}>
-                            <span className="font-semibold mr-1">{opt.key}.</span>
-                            {opt.text}
-                            {isRight && <span className="ml-2 text-emerald-600 font-medium">(correct)</span>}
-                            {wasSel && !isRight && <span className="ml-2 text-rose-600 font-medium">(your answer)</span>}
+                          <div key={opt.key} className={`p-2 rounded border text-xs flex items-start gap-2 ${cls}`}>
+                            <span className="shrink-0 w-4 text-center">{wasSel ? "☑" : "☐"}</span>
+                            <span>
+                              <span className="font-semibold mr-1">{opt.key}.</span>
+                              {opt.text}
+                              {isRight && <span className="ml-2 text-emerald-600 font-medium">(correct)</span>}
+                              {wasSel && <span className="ml-2 text-slate-600 font-medium">(your pick)</span>}
+                            </span>
                           </div>
                         );
                       })}
