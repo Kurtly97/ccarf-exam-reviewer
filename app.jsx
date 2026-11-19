@@ -3,6 +3,10 @@ const { useState, useEffect, useMemo, useRef, useCallback } = React;
 // ───────────────────────────── Utilities ─────────────────────────────
 
 const HISTORY_KEY = "ccarf_history_v1";
+const ASK_NAME_KEY = "ccarf_ask_name_v1";
+
+// Replace with your deployed Cloudflare Worker URL (see worker/README.md).
+const ASK_WORKER_URL = "https://ccarf-ask-proxy.kurtly97-ccarf.workers.dev";
 
 function shuffle(arr) {
   const a = arr.slice();
@@ -233,7 +237,7 @@ function Pill({ children, className }) {
   );
 }
 
-function RationaleBlock({ rationale, isCorrect, meta }) {
+function RationaleBlock({ rationale, isCorrect, meta, question }) {
   const { explanation, bullets } = useMemo(() => parseRationale(rationale), [rationale]);
   const boxCls = isCorrect ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200";
   const badgeCls = isCorrect ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700";
@@ -262,6 +266,98 @@ function RationaleBlock({ rationale, isCorrect, meta }) {
       )}
 
       {meta}
+
+      {question && <AskClaude question={question} />}
+    </div>
+  );
+}
+
+function AskClaude({ question }) {
+  const [open, setOpen] = useState(false);
+  const [userQuestion, setUserQuestion] = useState("");
+  const [answer, setAnswer] = useState(null);
+  const [remaining, setRemaining] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleAsk() {
+    if (!userQuestion.trim()) return;
+
+    let name = localStorage.getItem(ASK_NAME_KEY);
+    if (!name) {
+      const entered = window.prompt("Enter your first and last name (so you're recognized on the allowlist):");
+      if (!entered || !entered.trim()) return;
+      name = entered.trim();
+      localStorage.setItem(ASK_NAME_KEY, name);
+    }
+
+    setLoading(true);
+    setError(null);
+    setAnswer(null);
+    try {
+      const res = await fetch(ASK_WORKER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          prompt: question.prompt,
+          options: question.options,
+          correctAnswers: question.correctAnswers,
+          rationale: question.rationale,
+          userQuestion,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Something went wrong.");
+      } else {
+        setAnswer(data.answer);
+        setRemaining(data.remaining);
+      }
+    } catch {
+      setError("Could not reach the ask service. Check your connection.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-slate-200 pt-3">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="text-xs font-medium text-teal-700 hover:text-teal-900 underline"
+      >
+        {open ? "Hide" : "Ask a follow-up about this question"}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <textarea
+            value={userQuestion}
+            onChange={(e) => setUserQuestion(e.target.value)}
+            placeholder="e.g. Why wouldn't option C also work here?"
+            className="w-full border border-slate-300 rounded-lg p-2 text-sm"
+            rows={2}
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleAsk}
+              disabled={loading || !userQuestion.trim()}
+              className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-medium disabled:opacity-40"
+            >
+              {loading ? "Asking…" : "Ask"}
+            </button>
+            {remaining !== null && !error && (
+              <span className="text-xs text-slate-400">{remaining} ask{remaining === 1 ? "" : "s"} left today</span>
+            )}
+          </div>
+          {error && <p className="text-xs text-rose-600">{error}</p>}
+          {answer && (
+            <div className="bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+              {answer}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -310,7 +406,8 @@ function Home({ history, onStart, onClearHistory }) {
           <span className="font-semibold text-slate-800"> 75% or better in every domain.</span>
         </p>
         <p className="text-xs text-slate-400">
-          All progress is stored only in this browser (localStorage) — nothing is sent to a server.
+          Progress is stored only in this browser (localStorage). Using "Ask a follow-up" on a question sends that
+          question and your name to a rate-limited proxy to get an answer from Claude.
         </p>
       </header>
 
@@ -775,6 +872,7 @@ function Quiz({ session, onFinish, onExit }) {
                 rationale={q.rationale}
                 isCorrect={isCorrect(q, selected)}
                 meta={<p className="mt-2 text-xs text-slate-500">Topic: {q.topicTag}</p>}
+                question={q}
               />
             </div>
           )}
@@ -1011,6 +1109,7 @@ function Results({ result, onRetakeMissed, onHome }) {
                           Domain: {domainName(q.domainId)} · Topic: {q.topicTag}
                         </p>
                       }
+                      question={q}
                     />
                   </div>
                 )}
@@ -1116,6 +1215,7 @@ function StudyMode({ onExit }) {
                   <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
                     <p className="font-semibold text-slate-800 mb-1">Rationale</p>
                     <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">{q.rationale}</p>
+                    <AskClaude question={q} />
                   </div>
                 </div>
               )}

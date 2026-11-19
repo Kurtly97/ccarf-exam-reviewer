@@ -1,0 +1,13 @@
+name = "ccarf-ask-proxy"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Set this to your GitHub Pages origin after deploying, e.g. "https://yourusername.github.io"
+# Leave as "*" while testing locally.
+[vars]
+ALLOWED_ORIGIN = "https://kurtly97.github.io"
+DAILY_LIMIT = "30"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "95c1546e84a24ffb837adfd79bcea97a"
