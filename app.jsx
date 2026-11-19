@@ -290,19 +290,24 @@ function renderMarkdown(text) {
   return window.DOMPurify ? window.DOMPurify.sanitize(raw) : raw;
 }
 
+function AskAnswer({ text }) {
+  const html = useMemo(() => renderMarkdown(text), [text]);
+  return <div className="ask-answer bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700" dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
 function AskClaude({ question }) {
   const [open, setOpen] = useState(false);
   const [userQuestion, setUserQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
+  const [history, setHistory] = useState([]); // [{ question, answer }]
+  const [liveAnswer, setLiveAnswer] = useState("");
   const [remaining, setRemaining] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
 
-  const answerHtml = useMemo(() => renderMarkdown(answer), [answer]);
-
   async function handleAsk() {
-    if (!userQuestion.trim()) return;
+    const askedQuestion = userQuestion.trim();
+    if (!askedQuestion) return;
 
     let passphrase = localStorage.getItem(ASK_PASSPHRASE_KEY);
     if (!passphrase) {
@@ -323,7 +328,7 @@ function AskClaude({ question }) {
     setLoading(true);
     setStreaming(false);
     setError(null);
-    setAnswer("");
+    setLiveAnswer("");
     setRemaining(null);
 
     try {
@@ -337,7 +342,8 @@ function AskClaude({ question }) {
           options: question.options,
           correctAnswers: question.correctAnswers,
           rationale: question.rationale,
-          userQuestion,
+          userQuestion: askedQuestion,
+          history,
         }),
       });
 
@@ -356,18 +362,26 @@ function AskClaude({ question }) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let finalText = "";
+      let finalRemaining = null;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const match = buffer.match(ASK_REMAINING_MARKER_RE);
         if (match) {
-          setRemaining(Number(match[1]));
-          setAnswer(buffer.slice(0, match.index));
+          finalRemaining = Number(match[1]);
+          finalText = buffer.slice(0, match.index);
         } else {
-          setAnswer(buffer);
+          finalText = buffer;
         }
+        setLiveAnswer(finalText);
       }
+
+      setRemaining(finalRemaining);
+      setHistory((prev) => [...prev, { question: askedQuestion, answer: finalText }]);
+      setUserQuestion("");
+      setLiveAnswer("");
     } catch {
       setError("Could not reach the ask service. Check your connection.");
     } finally {
@@ -376,24 +390,46 @@ function AskClaude({ question }) {
     }
   }
 
+  function handleNewThread() {
+    setHistory([]);
+    setLiveAnswer("");
+    setError(null);
+    setRemaining(null);
+    setUserQuestion("");
+  }
+
   return (
     <div className="mt-3 border-t border-slate-200 pt-3">
       <button
         onClick={() => setOpen((o) => !o)}
         className="text-xs font-medium text-teal-700 hover:text-teal-900 underline"
       >
-        {open ? "Hide" : "Ask a follow-up about this question"}
+        {open ? "Hide" : history.length > 0 ? "Continue the conversation" : "Ask a follow-up about this question"}
       </button>
       {open && (
-        <div className="mt-2 space-y-2">
+        <div className="mt-2 space-y-3">
+          {history.map((turn, i) => (
+            <div key={i} className="space-y-1.5">
+              <p className="text-xs font-medium text-slate-500">You asked: {turn.question}</p>
+              <AskAnswer text={turn.answer} />
+            </div>
+          ))}
+
+          {(loading || streaming) && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-slate-500">You asked: {userQuestion.trim()}</p>
+              {liveAnswer ? <AskAnswer text={liveAnswer} /> : null}
+            </div>
+          )}
+
           <textarea
             value={userQuestion}
             onChange={(e) => setUserQuestion(e.target.value)}
-            placeholder="e.g. Why wouldn't option C also work here?"
+            placeholder={history.length > 0 ? "Ask another follow-up…" : "e.g. Why wouldn't option C also work here?"}
             className="w-full border border-slate-300 rounded-lg p-2 text-sm"
             rows={2}
           />
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <button
               onClick={handleAsk}
               disabled={loading || streaming || !userQuestion.trim()}
@@ -405,6 +441,8 @@ function AskClaude({ question }) {
                 </>
               ) : streaming ? (
                 "Writing…"
+              ) : history.length > 0 ? (
+                "Ask follow-up"
               ) : (
                 "Ask"
               )}
@@ -412,14 +450,13 @@ function AskClaude({ question }) {
             {remaining !== null && !error && (
               <span className="text-xs text-slate-400">{remaining} ask{remaining === 1 ? "" : "s"} left today</span>
             )}
+            {history.length > 0 && !loading && !streaming && (
+              <button onClick={handleNewThread} className="text-xs text-slate-400 hover:text-rose-500 underline">
+                Start a new question
+              </button>
+            )}
           </div>
           {error && <p className="text-xs text-rose-600">{error}</p>}
-          {answer && (
-            <div
-              className="ask-answer bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700"
-              dangerouslySetInnerHTML={{ __html: answerHtml }}
-            />
-          )}
         </div>
       )}
     </div>

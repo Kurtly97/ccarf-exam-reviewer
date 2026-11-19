@@ -25,7 +25,7 @@ function normalizeKey(str) {
   return String(str || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function buildPrompt({ prompt, options, correctAnswers, rationale, userQuestion }) {
+function buildInitialPrompt({ prompt, options, correctAnswers, rationale, userQuestion }) {
   const optionsText = (options || [])
     .map((o) => `${o.key}. ${o.text}${correctAnswers?.includes(o.key) ? "  [correct]" : ""}`)
     .join("\n");
@@ -35,6 +35,7 @@ function buildPrompt({ prompt, options, correctAnswers, rationale, userQuestion 
     "Below is a practice question, its options, the correct answer(s), and the official rationale.",
     "Answer the student's follow-up question about this item clearly and concisely, grounded only in the material shown.",
     "Format your answer in Markdown (short paragraphs, **bold** for key terms, `code` for identifiers, bullet lists where helpful).",
+    "The student may ask further follow-up questions after this one — keep answers grounded in this same question's context.",
     "",
     "QUESTION:",
     prompt,
@@ -48,6 +49,30 @@ function buildPrompt({ prompt, options, correctAnswers, rationale, userQuestion 
     "STUDENT'S FOLLOW-UP QUESTION:",
     userQuestion,
   ].join("\n");
+}
+
+const MAX_HISTORY_TURNS = 6; // caps token growth on long threads
+
+// Builds the full Messages API turn list: the first turn always carries the full
+// question context, later turns are just the raw back-and-forth so Claude uses
+// its own conversation memory instead of re-reading the context every time.
+function buildMessages({ prompt, options, correctAnswers, rationale, userQuestion, history }) {
+  const trimmedHistory = (history || []).slice(-MAX_HISTORY_TURNS);
+
+  if (trimmedHistory.length === 0) {
+    return [{ role: "user", content: buildInitialPrompt({ prompt, options, correctAnswers, rationale, userQuestion }) }];
+  }
+
+  const messages = [
+    { role: "user", content: buildInitialPrompt({ prompt, options, correctAnswers, rationale, userQuestion: trimmedHistory[0].question }) },
+    { role: "assistant", content: trimmedHistory[0].answer },
+  ];
+  for (let i = 1; i < trimmedHistory.length; i++) {
+    messages.push({ role: "user", content: trimmedHistory[i].question });
+    messages.push({ role: "assistant", content: trimmedHistory[i].answer });
+  }
+  messages.push({ role: "user", content: userQuestion });
+  return messages;
 }
 
 // Parses an Anthropic SSE stream and re-emits just the text deltas as plain chunks.
@@ -104,7 +129,7 @@ export default {
       return json({ error: "Invalid JSON body" }, 400, origin);
     }
 
-    const { passphrase, name, prompt, options, correctAnswers, rationale, userQuestion } = body;
+    const { passphrase, name, prompt, options, correctAnswers, rationale, userQuestion, history } = body;
 
     if (!passphrase || !name || !userQuestion || !prompt) {
       return json({ error: "Missing required fields: passphrase, name, userQuestion" }, 400, origin);
@@ -143,9 +168,7 @@ export default {
           model: MODEL,
           max_tokens: 500,
           stream: true,
-          messages: [
-            { role: "user", content: buildPrompt({ prompt, options, correctAnswers, rationale, userQuestion }) },
-          ],
+          messages: buildMessages({ prompt, options, correctAnswers, rationale, userQuestion, history }),
         }),
       });
     } catch (err) {
