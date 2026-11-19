@@ -7,6 +7,25 @@ const ASK_NAME_KEY = "ccarf_ask_name_v1";
 const ASK_PASSPHRASE_KEY = "ccarf_ask_passphrase_v1";
 const ASK_REMAINING_MARKER_RE = /\n<<<ASK_REMAINING:(\d+)>>>$/;
 const ASK_ERROR_MARKER_RE = /\n<<<ASK_ERROR:([^>]*)>>>$/;
+const ASK_THREAD_KEY_PREFIX = "ccarf_ask_thread_v1:";
+
+function loadAskThread(questionId) {
+  try {
+    const raw = localStorage.getItem(ASK_THREAD_KEY_PREFIX + questionId);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAskThread(questionId, history) {
+  try {
+    if (history.length === 0) localStorage.removeItem(ASK_THREAD_KEY_PREFIX + questionId);
+    else localStorage.setItem(ASK_THREAD_KEY_PREFIX + questionId, JSON.stringify(history));
+  } catch {
+    // storage full/unavailable — the thread just won't persist, nothing else breaks
+  }
+}
 
 // Replace with your deployed Cloudflare Worker URL (see worker/README.md).
 const ASK_WORKER_URL = "https://ccarf-ask-proxy.kurtly97-ccarf.workers.dev";
@@ -270,7 +289,7 @@ function RationaleBlock({ rationale, isCorrect, meta, question }) {
 
       {meta}
 
-      {question && <AskClaude question={question} />}
+      {question && <AskClaude key={question.id} question={question} />}
     </div>
   );
 }
@@ -297,14 +316,19 @@ function AskAnswer({ text }) {
 }
 
 function AskClaude({ question }) {
-  const [open, setOpen] = useState(false);
+  const savedHistory = loadAskThread(question.id);
+  const [open, setOpen] = useState(savedHistory.length > 0);
   const [userQuestion, setUserQuestion] = useState("");
-  const [history, setHistory] = useState([]); // [{ question, answer }]
+  const [history, setHistory] = useState(savedHistory); // [{ question, answer }]
   const [liveAnswer, setLiveAnswer] = useState("");
   const [remaining, setRemaining] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
+
+  useEffect(() => {
+    saveAskThread(question.id, history);
+  }, [question.id, history]);
 
   async function handleAsk() {
     const askedQuestion = userQuestion.trim();
@@ -1334,7 +1358,7 @@ function StudyMode({ onExit }) {
                   <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
                     <p className="font-semibold text-slate-800 mb-1">Rationale</p>
                     <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">{q.rationale}</p>
-                    <AskClaude question={q} />
+                    <AskClaude key={q.id} question={q} />
                   </div>
                 </div>
               )}
