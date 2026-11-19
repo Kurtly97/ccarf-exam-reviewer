@@ -1,5 +1,6 @@
 const MODEL = "claude-sonnet-4-5";
 const ANTHROPIC_VERSION = "2023-06-01";
+const REMAINING_MARKER = "\n<<<ASK_REMAINING:";
 
 function corsHeaders(origin) {
   return {
@@ -20,8 +21,8 @@ function todayKey() {
   return new Date().toISOString().slice(0, 10); // YYYY-MM-DD, UTC
 }
 
-function normalizeName(name) {
-  return String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
+function normalizeKey(str) {
+  return String(str || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 function buildPrompt({ prompt, options, correctAnswers, rationale, userQuestion }) {
@@ -33,6 +34,7 @@ function buildPrompt({ prompt, options, correctAnswers, rationale, userQuestion 
     "You are a study assistant helping a student prepare for the Claude Certified Architect Foundations (CCAR-F) exam.",
     "Below is a practice question, its options, the correct answer(s), and the official rationale.",
     "Answer the student's follow-up question about this item clearly and concisely, grounded only in the material shown.",
+    "Format your answer in Markdown (short paragraphs, **bold** for key terms, `code` for identifiers, bullet lists where helpful).",
     "",
     "QUESTION:",
     prompt,
@@ -46,6 +48,41 @@ function buildPrompt({ prompt, options, correctAnswers, rationale, userQuestion 
     "STUDENT'S FOLLOW-UP QUESTION:",
     userQuestion,
   ].join("\n");
+}
+
+// Parses an Anthropic SSE stream and re-emits just the text deltas as plain chunks.
+function textDeltaStream(upstreamBody) {
+  const reader = upstreamBody.getReader();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = "";
+
+  return new ReadableStream({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        return;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop(); // keep the last (possibly incomplete) event in the buffer
+
+      for (const evt of events) {
+        const dataLine = evt.split("\n").find((l) => l.startsWith("data:"));
+        if (!dataLine) continue;
+        try {
+          const payload = JSON.parse(dataLine.slice(5).trim());
+          if (payload.type === "content_block_delta" && payload.delta?.type === "text_delta") {
+            controller.enqueue(encoder.encode(payload.delta.text));
+          }
+        } catch {
+          // ignore malformed/partial event
+        }
+      }
+    },
+  });
 }
 
 export default {
@@ -67,24 +104,20 @@ export default {
       return json({ error: "Invalid JSON body" }, 400, origin);
     }
 
-    const { name, prompt, options, correctAnswers, rationale, userQuestion } = body;
+    const { passphrase, name, prompt, options, correctAnswers, rationale, userQuestion } = body;
 
-    if (!name || !userQuestion || !prompt) {
-      return json({ error: "Missing required fields: name, prompt, userQuestion" }, 400, origin);
+    if (!passphrase || !name || !userQuestion || !prompt) {
+      return json({ error: "Missing required fields: passphrase, name, userQuestion" }, 400, origin);
     }
 
-    // --- Allowlist check ---
-    const allowed = (env.ALLOWED_NAMES || "")
-      .split(",")
-      .map(normalizeName)
-      .filter(Boolean);
-    if (!allowed.includes(normalizeName(name))) {
-      return json({ error: "Name not recognized. Ask the admin to add you to the list." }, 403, origin);
+    // --- Passphrase gate (shared secret, not a per-person allowlist) ---
+    if (normalizeKey(passphrase) !== normalizeKey(env.ASK_PASSPHRASE)) {
+      return json({ error: "Incorrect passphrase." }, 403, origin);
     }
 
-    // --- Rate limit check (per person, per day) ---
+    // --- Rate limit check (per name, per day — name is free text, just used to split up the shared quota) ---
     const dailyLimit = Number(env.DAILY_LIMIT || 30);
-    const countKey = `count:${normalizeName(name)}:${todayKey()}`;
+    const countKey = `count:${normalizeKey(name)}:${todayKey()}`;
     const currentCountRaw = await env.RATE_LIMIT_KV.get(countKey);
     const currentCount = currentCountRaw ? Number(currentCountRaw) : 0;
 
@@ -96,10 +129,10 @@ export default {
       );
     }
 
-    // --- Call Claude ---
-    let answer;
+    // --- Call Claude, streaming the response straight through to the client ---
+    let anthropicRes;
     try {
-      const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+      anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -109,27 +142,45 @@ export default {
         body: JSON.stringify({
           model: MODEL,
           max_tokens: 500,
+          stream: true,
           messages: [
             { role: "user", content: buildPrompt({ prompt, options, correctAnswers, rationale, userQuestion }) },
           ],
         }),
       });
-
-      if (!anthropicRes.ok) {
-        const errText = await anthropicRes.text();
-        return json({ error: `Claude API error: ${errText}` }, 502, origin);
-      }
-
-      const data = await anthropicRes.json();
-      answer = data.content?.[0]?.text || "(no response)";
     } catch (err) {
       return json({ error: `Request to Claude failed: ${err.message}` }, 502, origin);
     }
 
-    // --- Increment usage counter (expires after 2 days so KV self-cleans) ---
+    if (!anthropicRes.ok) {
+      const errText = await anthropicRes.text();
+      return json({ error: `Claude API error: ${errText}` }, 502, origin);
+    }
+
+    // Reserve the quota slot now so concurrent asks from the same name can't race past the limit.
     const newCount = currentCount + 1;
     await env.RATE_LIMIT_KV.put(countKey, String(newCount), { expirationTtl: 60 * 60 * 48 });
+    const remaining = dailyLimit - newCount;
 
-    return json({ answer, remaining: dailyLimit - newCount }, 200, origin);
+    const upstream = textDeltaStream(anthropicRes.body);
+    const encoder = new TextEncoder();
+
+    const combined = new ReadableStream({
+      async start(controller) {
+        const reader = upstream.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          controller.enqueue(value);
+        }
+        controller.enqueue(encoder.encode(`${REMAINING_MARKER}${remaining}>>>`));
+        controller.close();
+      },
+    });
+
+    return new Response(combined, {
+      status: 200,
+      headers: { "Content-Type": "text/plain; charset=utf-8", ...corsHeaders(origin) },
+    });
   },
 };

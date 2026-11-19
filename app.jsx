@@ -4,6 +4,8 @@ const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
 const HISTORY_KEY = "ccarf_history_v1";
 const ASK_NAME_KEY = "ccarf_ask_name_v1";
+const ASK_PASSPHRASE_KEY = "ccarf_ask_passphrase_v1";
+const ASK_REMAINING_MARKER_RE = /\n<<<ASK_REMAINING:(\d+)>>>$/;
 
 // Replace with your deployed Cloudflare Worker URL (see worker/README.md).
 const ASK_WORKER_URL = "https://ccarf-ask-proxy.kurtly97-ccarf.workers.dev";
@@ -272,33 +274,64 @@ function RationaleBlock({ rationale, isCorrect, meta, question }) {
   );
 }
 
+function LoadingDots() {
+  return (
+    <span className="inline-flex gap-1 items-center">
+      <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-bounce" style={{ animationDelay: "0ms" }} />
+      <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-bounce" style={{ animationDelay: "150ms" }} />
+      <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-bounce" style={{ animationDelay: "300ms" }} />
+    </span>
+  );
+}
+
+function renderMarkdown(text) {
+  if (!text) return "";
+  const raw = window.marked ? window.marked.parse(text) : text;
+  return window.DOMPurify ? window.DOMPurify.sanitize(raw) : raw;
+}
+
 function AskClaude({ question }) {
   const [open, setOpen] = useState(false);
   const [userQuestion, setUserQuestion] = useState("");
-  const [answer, setAnswer] = useState(null);
+  const [answer, setAnswer] = useState("");
   const [remaining, setRemaining] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+
+  const answerHtml = useMemo(() => renderMarkdown(answer), [answer]);
 
   async function handleAsk() {
     if (!userQuestion.trim()) return;
 
+    let passphrase = localStorage.getItem(ASK_PASSPHRASE_KEY);
+    if (!passphrase) {
+      const entered = window.prompt("Enter the access passphrase:");
+      if (!entered || !entered.trim()) return;
+      passphrase = entered.trim();
+      localStorage.setItem(ASK_PASSPHRASE_KEY, passphrase);
+    }
+
     let name = localStorage.getItem(ASK_NAME_KEY);
     if (!name) {
-      const entered = window.prompt("Enter your first and last name (so you're recognized on the allowlist):");
+      const entered = window.prompt("Enter your name (used only to track your own daily limit):");
       if (!entered || !entered.trim()) return;
       name = entered.trim();
       localStorage.setItem(ASK_NAME_KEY, name);
     }
 
     setLoading(true);
+    setStreaming(false);
     setError(null);
-    setAnswer(null);
+    setAnswer("");
+    setRemaining(null);
+
     try {
       const res = await fetch(ASK_WORKER_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          passphrase,
           name,
           prompt: question.prompt,
           options: question.options,
@@ -307,17 +340,39 @@ function AskClaude({ question }) {
           userQuestion,
         }),
       });
-      const data = await res.json();
+
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 403 && /passphrase/i.test(data.error || "")) {
+          localStorage.removeItem(ASK_PASSPHRASE_KEY);
+        }
         setError(data.error || "Something went wrong.");
-      } else {
-        setAnswer(data.answer);
-        setRemaining(data.remaining);
+        return;
+      }
+
+      setLoading(false);
+      setStreaming(true);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const match = buffer.match(ASK_REMAINING_MARKER_RE);
+        if (match) {
+          setRemaining(Number(match[1]));
+          setAnswer(buffer.slice(0, match.index));
+        } else {
+          setAnswer(buffer);
+        }
       }
     } catch {
       setError("Could not reach the ask service. Check your connection.");
     } finally {
       setLoading(false);
+      setStreaming(false);
     }
   }
 
@@ -341,10 +396,18 @@ function AskClaude({ question }) {
           <div className="flex items-center gap-2">
             <button
               onClick={handleAsk}
-              disabled={loading || !userQuestion.trim()}
-              className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-medium disabled:opacity-40"
+              disabled={loading || streaming || !userQuestion.trim()}
+              className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-medium disabled:opacity-40 flex items-center gap-2"
             >
-              {loading ? "Asking…" : "Ask"}
+              {loading ? (
+                <>
+                  Thinking <LoadingDots />
+                </>
+              ) : streaming ? (
+                "Writing…"
+              ) : (
+                "Ask"
+              )}
             </button>
             {remaining !== null && !error && (
               <span className="text-xs text-slate-400">{remaining} ask{remaining === 1 ? "" : "s"} left today</span>
@@ -352,9 +415,10 @@ function AskClaude({ question }) {
           </div>
           {error && <p className="text-xs text-rose-600">{error}</p>}
           {answer && (
-            <div className="bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
-              {answer}
-            </div>
+            <div
+              className="ask-answer bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700"
+              dangerouslySetInnerHTML={{ __html: answerHtml }}
+            />
           )}
         </div>
       )}

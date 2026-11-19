@@ -1,8 +1,9 @@
 # CCAR-F Ask Proxy (Cloudflare Worker)
 
 Proxies "ask a follow-up" requests from the exam reviewer app to the Claude API,
-so the Anthropic API key never reaches the browser. Enforces a per-person,
-per-day limit and a name allowlist.
+so the Anthropic API key never reaches the browser. Gated by a shared passphrase,
+with a per-day limit split out per name (name is free text, just used to divide
+the quota — it isn't checked against any list).
 
 ## One-time setup
 
@@ -26,16 +27,11 @@ Set your secrets (these are never written to any file or committed to git):
 
 ```bash
 npx wrangler secret put ANTHROPIC_API_KEY
-npx wrangler secret put ALLOWED_NAMES
+npx wrangler secret put ASK_PASSPHRASE
 ```
 
-For `ALLOWED_NAMES`, enter a comma-separated list, e.g.:
-
-```
-Jane Doe, John Smith, Alex Garcia
-```
-
-Matching is case-insensitive and ignores extra whitespace.
+For `ASK_PASSPHRASE`, enter the single shared passphrase you'll give to everyone who
+should have access. Matching is case-insensitive and ignores extra whitespace.
 
 ## Deploy
 

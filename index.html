@@ -8,8 +8,38 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/marked@12.0.2/marked.min.js"></script>
+  <script src="https://unpkg.com/dompurify@3.1.5/dist/purify.min.js"></script>
   <style>
     body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+    .ask-answer :first-child { margin-top: 0; }
+    .ask-answer :last-child { margin-bottom: 0; }
+    .ask-answer p { margin: 0.5em 0; line-height: 1.6; }
+    .ask-answer h1, .ask-answer h2, .ask-answer h3 {
+      font-weight: 600; color: #1e293b; margin: 0.75em 0 0.35em;
+    }
+    .ask-answer h1 { font-size: 1.05rem; }
+    .ask-answer h2 { font-size: 1rem; }
+    .ask-answer h3 { font-size: 0.95rem; }
+    .ask-answer strong { font-weight: 600; color: #0f172a; }
+    .ask-answer ul, .ask-answer ol { margin: 0.4em 0 0.4em 1.25em; }
+    .ask-answer ul { list-style: disc; }
+    .ask-answer ol { list-style: decimal; }
+    .ask-answer li { margin: 0.2em 0; }
+    .ask-answer code {
+      background: #f1f5f9; border-radius: 4px; padding: 0.1em 0.35em;
+      font-size: 0.85em; font-family: ui-monospace, monospace;
+    }
+    .ask-answer pre {
+      background: #0f172a; color: #e2e8f0; border-radius: 8px;
+      padding: 0.75em; overflow-x: auto; margin: 0.5em 0;
+    }
+    .ask-answer pre code { background: none; padding: 0; color: inherit; }
+    .ask-answer blockquote {
+      border-left: 3px solid #cbd5e1; padding-left: 0.75em; color: #475569; margin: 0.5em 0;
+    }
+    .ask-answer a { color: #0d9488; text-decoration: underline; }
   </style>
 </head>
 <body>
