@@ -6,6 +6,7 @@ const HISTORY_KEY = "ccarf_history_v1";
 const ASK_NAME_KEY = "ccarf_ask_name_v1";
 const ASK_PASSPHRASE_KEY = "ccarf_ask_passphrase_v1";
 const ASK_REMAINING_MARKER_RE = /\n<<<ASK_REMAINING:(\d+)>>>$/;
+const ASK_ERROR_MARKER_RE = /\n<<<ASK_ERROR:([^>]*)>>>$/;
 
 // Replace with your deployed Cloudflare Worker URL (see worker/README.md).
 const ASK_WORKER_URL = "https://ccarf-ask-proxy.kurtly97-ccarf.workers.dev";
@@ -364,10 +365,20 @@ function AskClaude({ question }) {
       let buffer = "";
       let finalText = "";
       let finalRemaining = null;
+      let streamError = null;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
+
+        const errMatch = buffer.match(ASK_ERROR_MARKER_RE);
+        if (errMatch) {
+          streamError = errMatch[1] || "The response was interrupted.";
+          finalText = buffer.slice(0, errMatch.index);
+          setLiveAnswer(finalText);
+          continue;
+        }
+
         const match = buffer.match(ASK_REMAINING_MARKER_RE);
         if (match) {
           finalRemaining = Number(match[1]);
@@ -376,6 +387,12 @@ function AskClaude({ question }) {
           finalText = buffer;
         }
         setLiveAnswer(finalText);
+      }
+
+      if (streamError) {
+        // Keep the partial answer visible and the question in the box so a retry is one click away.
+        setError(`Response was cut off (${streamError}). The partial answer above is incomplete — try asking again.`);
+        return;
       }
 
       setRemaining(finalRemaining);
@@ -415,10 +432,11 @@ function AskClaude({ question }) {
             </div>
           ))}
 
-          {(loading || streaming) && (
+          {(loading || streaming || (error && liveAnswer)) && (
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-slate-500">You asked: {userQuestion.trim()}</p>
               {liveAnswer ? <AskAnswer text={liveAnswer} /> : null}
+              {error && liveAnswer && <p className="text-xs text-amber-600">⚠ Cut off partway through — incomplete.</p>}
             </div>
           )}
 

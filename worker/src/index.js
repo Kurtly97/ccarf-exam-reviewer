@@ -1,6 +1,7 @@
 const MODEL = "claude-sonnet-4-5";
 const ANTHROPIC_VERSION = "2023-06-01";
 const REMAINING_MARKER = "\n<<<ASK_REMAINING:";
+const ERROR_MARKER = "\n<<<ASK_ERROR:";
 
 function corsHeaders(origin) {
   return {
@@ -84,7 +85,13 @@ function textDeltaStream(upstreamBody) {
 
   return new ReadableStream({
     async pull(controller) {
-      const { done, value } = await reader.read();
+      let done, value;
+      try {
+        ({ done, value } = await reader.read());
+      } catch (err) {
+        controller.error(new Error(`Connection to Claude dropped: ${err.message}`));
+        return;
+      }
       if (done) {
         controller.close();
         return;
@@ -97,13 +104,19 @@ function textDeltaStream(upstreamBody) {
       for (const evt of events) {
         const dataLine = evt.split("\n").find((l) => l.startsWith("data:"));
         if (!dataLine) continue;
+        let payload;
         try {
-          const payload = JSON.parse(dataLine.slice(5).trim());
-          if (payload.type === "content_block_delta" && payload.delta?.type === "text_delta") {
-            controller.enqueue(encoder.encode(payload.delta.text));
-          }
+          payload = JSON.parse(dataLine.slice(5).trim());
         } catch {
-          // ignore malformed/partial event
+          continue; // malformed/partial event — skip it, don't fail the whole stream
+        }
+        if (payload.type === "content_block_delta" && payload.delta?.type === "text_delta") {
+          controller.enqueue(encoder.encode(payload.delta.text));
+        } else if (payload.type === "error") {
+          // Anthropic can send a mid-stream error event (e.g. overloaded_error) and then close
+          // the connection — surface it instead of silently ending with a truncated answer.
+          controller.error(new Error(payload.error?.message || "Claude reported a mid-stream error"));
+          return;
         }
       }
     },
@@ -166,7 +179,7 @@ export default {
         },
         body: JSON.stringify({
           model: MODEL,
-          max_tokens: 500,
+          max_tokens: 1024,
           stream: true,
           messages: buildMessages({ prompt, options, correctAnswers, rationale, userQuestion, history }),
         }),
@@ -191,13 +204,18 @@ export default {
     const combined = new ReadableStream({
       async start(controller) {
         const reader = upstream.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          controller.enqueue(value);
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            controller.enqueue(value);
+          }
+          controller.enqueue(encoder.encode(`${REMAINING_MARKER}${remaining}>>>`));
+        } catch (err) {
+          controller.enqueue(encoder.encode(`${ERROR_MARKER}${(err.message || "stream interrupted").replace(/>/g, "")}>>>`));
+        } finally {
+          controller.close();
         }
-        controller.enqueue(encoder.encode(`${REMAINING_MARKER}${remaining}>>>`));
-        controller.close();
       },
     });
 
