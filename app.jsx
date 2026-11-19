@@ -1267,13 +1267,22 @@ function Results({ result, onRetakeMissed, onHome }) {
 
 // ───────────────────────────── Study / Review Mode ─────────────────────────────
 
-function StudyMode({ onExit }) {
+function StudyMode({ onExit, history }) {
   const [scenarioFilter, setScenarioFilter] = useState("all");
   const [domainFilter, setDomainFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [attemptFilter, setAttemptFilter] = useState("all");
   const [expanded, setExpanded] = useState(() => new Set());
 
+  const attemptsWithIds = useMemo(
+    () => (history || []).filter((a) => a.questionIds && a.questionIds.length > 0).slice().reverse(),
+    [history]
+  );
+  const selectedAttempt = attemptFilter === "all" ? null : attemptsWithIds.find((a) => a.id === attemptFilter);
+  const attemptIdSet = selectedAttempt ? new Set(selectedAttempt.questionIds) : null;
+
   const filtered = QUESTIONS.filter((q) => {
+    if (attemptIdSet && !attemptIdSet.has(q.id)) return false;
     if (scenarioFilter !== "all" && q.scenarioId !== Number(scenarioFilter)) return false;
     if (domainFilter !== "all" && q.domainId !== Number(domainFilter)) return false;
     if (search.trim()) {
@@ -1302,6 +1311,20 @@ function StudyMode({ onExit }) {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4 flex flex-wrap gap-3 items-center">
+        {attemptsWithIds.length > 0 && (
+          <select
+            value={attemptFilter}
+            onChange={(e) => setAttemptFilter(e.target.value)}
+            className="border border-slate-300 rounded px-2 py-1.5 text-sm"
+          >
+            <option value="all">All questions</option>
+            {attemptsWithIds.map((a) => (
+              <option key={a.id} value={a.id}>
+                {new Date(a.timestamp).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} — {a.title} ({a.scorePct}%)
+              </option>
+            ))}
+          </select>
+        )}
         <select value={scenarioFilter} onChange={(e) => setScenarioFilter(e.target.value)} className="border border-slate-300 rounded px-2 py-1.5 text-sm">
           <option value="all">All scenarios</option>
           {SCENARIOS.map((s) => (
@@ -1401,6 +1424,7 @@ function App() {
       byScenario: score.byScenario,
       byTopic: score.byTopic,
       wrongIds: score.wrongIds,
+      questionIds: session.questions.map((q) => q.id),
     };
     saveAttempt(attempt);
     setHistory(loadHistory());
@@ -1430,7 +1454,7 @@ function App() {
       {view === "home" && <Home history={history} onStart={startSession} onClearHistory={clearAllHistory} />}
       {view === "quiz" && session && <Quiz session={session} onFinish={finishQuiz} onExit={goHome} />}
       {view === "results" && result && <Results result={result} onRetakeMissed={retakeMissed} onHome={goHome} />}
-      {view === "study" && <StudyMode onExit={goHome} />}
+      {view === "study" && <StudyMode onExit={goHome} history={history} />}
     </div>
   );
 }
