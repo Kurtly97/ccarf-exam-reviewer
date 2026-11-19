@@ -77,27 +77,18 @@ function buildMessages({ prompt, options, correctAnswers, rationale, userQuestio
 }
 
 // Parses an Anthropic SSE stream and re-emits just the text deltas as plain chunks.
-function textDeltaStream(upstreamBody) {
-  const reader = upstreamBody.getReader();
+// Uses TransformStream (Cloudflare's documented pattern for piping/modifying a streaming
+// Response body) rather than a hand-rolled ReadableStream — a custom ReadableStream whose
+// start() drives the whole read loop can get killed by the Workers runtime's "hung" detector
+// even while it's actively producing output.
+function sseTextDeltaTransform() {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let buffer = "";
 
-  return new ReadableStream({
-    async pull(controller) {
-      let done, value;
-      try {
-        ({ done, value } = await reader.read());
-      } catch (err) {
-        controller.error(new Error(`Connection to Claude dropped: ${err.message}`));
-        return;
-      }
-      if (done) {
-        controller.close();
-        return;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
+  return new TransformStream({
+    transform(chunk, controller) {
+      buffer += decoder.decode(chunk, { stream: true });
       const events = buffer.split("\n\n");
       buffer = events.pop(); // keep the last (possibly incomplete) event in the buffer
 
@@ -116,7 +107,6 @@ function textDeltaStream(upstreamBody) {
           // Anthropic can send a mid-stream error event (e.g. overloaded_error) and then close
           // the connection — surface it instead of silently ending with a truncated answer.
           controller.error(new Error(payload.error?.message || "Claude reported a mid-stream error"));
-          return;
         }
       }
     },
@@ -124,7 +114,7 @@ function textDeltaStream(upstreamBody) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const origin = env.ALLOWED_ORIGIN || "*";
 
     if (request.method === "OPTIONS") {
@@ -193,33 +183,47 @@ export default {
       return json({ error: `Claude API error: ${errText}` }, 502, origin);
     }
 
-    // Reserve the quota slot now so concurrent asks from the same name can't race past the limit.
+    // Reserve the quota slot without blocking the response on KV write latency — an occasional
+    // slow KV write here was tripping Cloudflare's "Worker hung" detector and killing the request.
     const newCount = currentCount + 1;
-    await env.RATE_LIMIT_KV.put(countKey, String(newCount), { expirationTtl: 60 * 60 * 48 });
+    ctx.waitUntil(env.RATE_LIMIT_KV.put(countKey, String(newCount), { expirationTtl: 60 * 60 * 48 }));
     const remaining = dailyLimit - newCount;
 
-    const upstream = textDeltaStream(anthropicRes.body);
     const encoder = new TextEncoder();
+    const textStream = anthropicRes.body.pipeThrough(sseTextDeltaTransform());
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
 
-    const combined = new ReadableStream({
-      async start(controller) {
-        const reader = upstream.getReader();
+    // Pump in the background (not inside the ReadableStream's own start()/pull() lifecycle —
+    // that pattern is what was tripping the "hung" detector). The Response below is returned
+    // immediately; ctx.waitUntil keeps this pump alive until it finishes writing.
+    ctx.waitUntil(
+      (async () => {
         try {
+          const reader = textStream.getReader();
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            controller.enqueue(value);
+            await writer.write(value);
           }
-          controller.enqueue(encoder.encode(`${REMAINING_MARKER}${remaining}>>>`));
+          await writer.write(encoder.encode(`${REMAINING_MARKER}${remaining}>>>`));
         } catch (err) {
-          controller.enqueue(encoder.encode(`${ERROR_MARKER}${(err.message || "stream interrupted").replace(/>/g, "")}>>>`));
+          try {
+            await writer.write(encoder.encode(`${ERROR_MARKER}${(err.message || "stream interrupted").replace(/>/g, "")}>>>`));
+          } catch {
+            // writer already errored/closed — nothing more we can do
+          }
         } finally {
-          controller.close();
+          try {
+            await writer.close();
+          } catch {
+            // already closed
+          }
         }
-      },
-    });
+      })()
+    );
 
-    return new Response(combined, {
+    return new Response(readable, {
       status: 200,
       headers: { "Content-Type": "text/plain; charset=utf-8", ...corsHeaders(origin) },
     });
