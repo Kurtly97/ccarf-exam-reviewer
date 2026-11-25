@@ -154,6 +154,25 @@ function clearHistory() {
   } catch (e) {}
 }
 
+const FLASHCARD_PROGRESS_KEY = "ccarf_flashcard_progress_v1";
+
+function loadFlashcardProgress() {
+  try {
+    const raw = localStorage.getItem(FLASHCARD_PROGRESS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveFlashcardProgress(progress) {
+  try {
+    localStorage.setItem(FLASHCARD_PROGRESS_KEY, JSON.stringify(progress));
+  } catch (e) {
+    /* storage unavailable — continue without persistence */
+  }
+}
+
 function scoreSession(questions, answers) {
   const byDomain = {};
   const byScenario = {};
@@ -674,6 +693,13 @@ function Home({ history, onStart, onClearHistory }) {
           description="Browse every question with the answer and full rationale already shown — great for first-pass learning."
           action="Open study mode"
           onClick={() => onStart({ type: "study" })}
+        />
+        <ModeCard
+          title="Flashcards"
+          badge="Self-rated"
+          description="Flip through concept cards from the quick-reference sheet and the question bank's topic rationales. Rate yourself; cards you're still learning come back more often."
+          action="Open flashcards"
+          onClick={() => onStart({ type: "flashcards" })}
         />
       </section>
 
@@ -1393,10 +1419,269 @@ function StudyMode({ onExit, history }) {
   );
 }
 
+// ───────────────────────────── Flashcards ─────────────────────────────
+
+function buildFlashcardDeck() {
+  const quickRefCards = FLASHCARDS.map((c) => ({
+    id: c.id,
+    source: "quick-reference",
+    category: c.category,
+    front: c.front,
+    back: c.back,
+    // Synthetic "question" so AskClaude has a prompt + rationale to ground follow-ups in.
+    askQuestion: { id: c.id, prompt: c.front, options: [], correctAnswers: [], rationale: c.back },
+  }));
+
+  const questionBankCards = QUESTIONS.map((q) => ({
+    id: `qb-${q.id}`,
+    source: "question-bank",
+    category: domainName(q.domainId),
+    front: q.topicTag,
+    context: `${scenarioTitle(q.scenarioId)} — ${q.prompt}`,
+    back: parseRationale(q.rationale).explanation,
+    // Reuses the original question's id, so a follow-up thread is shared with Study mode on the same question.
+    askQuestion: q,
+  }));
+
+  return [...quickRefCards, ...questionBankCards];
+}
+
+const FLASHCARD_DECK = buildFlashcardDeck();
+const FLASHCARD_CATEGORIES = [...new Set(FLASHCARD_DECK.map((c) => c.category))];
+
+// "Still learning" cards get duplicated into the shuffled queue so they resurface more often.
+const LEARNING_WEIGHT = 3;
+
+function buildWeightedQueue(cards, progress) {
+  const pool = [];
+  for (const card of cards) {
+    const status = progress[card.id]?.status;
+    const copies = status === "known" ? 1 : LEARNING_WEIGHT;
+    for (let i = 0; i < copies; i++) pool.push(card.id);
+  }
+  return shuffle(pool);
+}
+
+function FlashcardMode({ onExit }) {
+  const [progress, setProgress] = useState(() => loadFlashcardProgress());
+  const [sourceFilter, setSourceFilter] = useState("all"); // 'all' | 'quick-reference' | 'question-bank'
+  const [categoryPick, setCategoryPick] = useState(() => new Set());
+  const [flipped, setFlipped] = useState(false);
+  const [queue, setQueue] = useState([]);
+  const [queuePos, setQueuePos] = useState(0);
+
+  const filteredCards = useMemo(() => {
+    return FLASHCARD_DECK.filter((c) => {
+      if (sourceFilter !== "all" && c.source !== sourceFilter) return false;
+      if (categoryPick.size > 0 && !categoryPick.has(c.category)) return false;
+      return true;
+    });
+  }, [sourceFilter, categoryPick]);
+
+  const categoriesForFilter = useMemo(() => {
+    const cats = sourceFilter === "all" ? FLASHCARD_CATEGORIES : [...new Set(FLASHCARD_DECK.filter((c) => c.source === sourceFilter).map((c) => c.category))];
+    return cats;
+  }, [sourceFilter]);
+
+  // Rebuild the queue whenever the filtered set changes (source/category filters).
+  useEffect(() => {
+    setQueue(buildWeightedQueue(filteredCards, progress));
+    setQueuePos(0);
+    setFlipped(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredCards]);
+
+  const cardsById = useMemo(() => new Map(filteredCards.map((c) => [c.id, c])), [filteredCards]);
+  const currentId = queue[queuePos];
+  const current = currentId ? cardsById.get(currentId) : null;
+
+  const masteredCount = filteredCards.filter((c) => progress[c.id]?.status === "known").length;
+
+  function toggleCategory(id) {
+    setCategoryPick((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function advance() {
+    setFlipped(false);
+    if (queuePos + 1 >= queue.length) {
+      setQueue(buildWeightedQueue(filteredCards, progress));
+      setQueuePos(0);
+    } else {
+      setQueuePos((p) => p + 1);
+    }
+  }
+
+  function goBack() {
+    setFlipped(false);
+    setQueuePos((p) => Math.max(0, p - 1));
+  }
+
+  function rate(status) {
+    if (!current) return;
+    setProgress((prev) => {
+      const next = { ...prev, [current.id]: { status, lastSeen: Date.now() } };
+      saveFlashcardProgress(next);
+      return next;
+    });
+    advance();
+  }
+
+  function handleReshuffle() {
+    setQueue(buildWeightedQueue(filteredCards, progress));
+    setQueuePos(0);
+    setFlipped(false);
+  }
+
+  function handleKeyDown(e) {
+    if (e.code === "Space" || e.key === "Enter") {
+      e.preventDefault();
+      setFlipped((f) => !f);
+    } else if (e.key === "ArrowRight") {
+      advance();
+    } else if (e.key === "ArrowLeft") {
+      goBack();
+    }
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-6" tabIndex={0} onKeyDown={handleKeyDown}>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-lg font-semibold text-slate-800">Flashcards</h1>
+        <button onClick={onExit} className="text-xs text-slate-400 hover:text-rose-500 underline">
+          Exit
+        </button>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-slate-500 mr-1">Source:</span>
+          {[
+            { id: "all", label: "All" },
+            { id: "quick-reference", label: "Quick Reference" },
+            { id: "question-bank", label: "Question Bank" },
+          ].map((opt) => (
+            <button
+              key={opt.id}
+              onClick={() => {
+                setSourceFilter(opt.id);
+                setCategoryPick(new Set());
+              }}
+              className={`px-2.5 py-1 rounded-full text-xs border ${
+                sourceFilter === opt.id ? "bg-teal-600 text-white border-teal-600" : "bg-white text-slate-600 border-slate-300"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {categoriesForFilter.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => toggleCategory(cat)}
+              className={`px-2 py-0.5 rounded-full text-xs border ${
+                categoryPick.has(cat) ? "bg-indigo-100 text-indigo-700 border-indigo-300" : "bg-slate-50 text-slate-500 border-slate-200"
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <ProgressBar pct={filteredCards.length ? (masteredCount / filteredCards.length) * 100 : 0} colorClass="bg-emerald-500" />
+          </div>
+          <span className="text-xs text-slate-500 shrink-0">
+            {masteredCount}/{filteredCards.length} mastered
+          </span>
+        </div>
+      </div>
+
+      {!current ? (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center text-slate-500 text-sm">
+          No cards match the current filters.
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+            <span>Card {queuePos + 1} of {queue.length}</span>
+            <button onClick={handleReshuffle} className="underline hover:text-slate-600">Reshuffle</button>
+          </div>
+
+          <div
+            onClick={() => setFlipped((f) => !f)}
+            className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 min-h-[260px] flex flex-col cursor-pointer select-none"
+          >
+            <div className="flex items-center gap-2 mb-4">
+              <Pill className={current.source === "quick-reference" ? "bg-sky-50 text-sky-700" : "bg-indigo-50 text-indigo-700"}>
+                {current.category}
+              </Pill>
+              {progress[current.id]?.status && (
+                <Pill className={progress[current.id].status === "known" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}>
+                  {progress[current.id].status === "known" ? "Got it" : "Still learning"}
+                </Pill>
+              )}
+            </div>
+            <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
+              <p className={`text-lg ${flipped ? "text-slate-700" : "text-slate-900 font-semibold"} whitespace-pre-wrap leading-relaxed`}>
+                {flipped ? current.back : current.front}
+              </p>
+              {!flipped && current.context && (
+                <p className="text-sm text-slate-500 whitespace-pre-wrap leading-relaxed max-w-xl">{current.context}</p>
+              )}
+            </div>
+            <p className="text-center text-xs text-slate-400 mt-4">
+              {flipped ? "Click or press space to flip back" : "Click or press space to reveal"}
+            </p>
+          </div>
+
+          {flipped && (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mt-3">
+              <AskClaude key={current.id} question={current.askQuestion} />
+            </div>
+          )}
+
+          <div className="flex items-center justify-between mt-4">
+            <button
+              onClick={goBack}
+              disabled={queuePos === 0}
+              className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50"
+            >
+              ← Prev
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => rate("learning")}
+                className="px-4 py-2 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 text-sm font-medium hover:bg-amber-100"
+              >
+                Still learning
+              </button>
+              <button
+                onClick={() => rate("known")}
+                className="px-4 py-2 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 text-sm font-medium hover:bg-emerald-100"
+              >
+                Got it
+              </button>
+            </div>
+            <button onClick={advance} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50">
+              Next →
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ───────────────────────────── App root ─────────────────────────────
 
 function App() {
-  const [view, setView] = useState("home"); // 'home' | 'quiz' | 'results' | 'study'
+  const [view, setView] = useState("home"); // 'home' | 'quiz' | 'results' | 'study' | 'flashcards'
   const [session, setSession] = useState(null);
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState(() => loadHistory());
@@ -1404,6 +1689,10 @@ function App() {
   function startSession(s) {
     if (s.type === "study") {
       setView("study");
+      return;
+    }
+    if (s.type === "flashcards") {
+      setView("flashcards");
       return;
     }
     setSession(s);
@@ -1455,6 +1744,7 @@ function App() {
       {view === "quiz" && session && <Quiz session={session} onFinish={finishQuiz} onExit={goHome} />}
       {view === "results" && result && <Results result={result} onRetakeMissed={retakeMissed} onHome={goHome} />}
       {view === "study" && <StudyMode onExit={goHome} history={history} />}
+      {view === "flashcards" && <FlashcardMode onExit={goHome} />}
     </div>
   );
 }
